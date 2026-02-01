@@ -1,3 +1,4 @@
+import glob
 import os
 import yt_dlp # Добавь этот импорт в самое начало файла
 import requests
