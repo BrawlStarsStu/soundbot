@@ -313,34 +313,40 @@ async def send_audio_track(message, track, idx_for_fav):
     t_title = getattr(track, 'title', 'Unknown Track')
     wait_msg = await message.answer(f"⬇️ Загружаю: {t_title}...")
     
-    # Генерируем уникальное имя файла, чтобы запросы не пересекались
-    filename = f"track_{getattr(track, 'id', 'temp')}.mp3"
+    # Генерируем базовое имя файла БЕЗ расширения
+    track_id = getattr(track, 'id', 'temp')
+    base_filename = f"track_{track_id}"
     
+    # Переменная для итогового имени файла
+    final_filename = None
+
     try:
-        # Настройки yt-dlp для SoundCloud
+        # Настройки yt-dlp БЕЗ использования FFmpeg
         ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': filename, # Куда сохранять
+            'format': 'bestaudio/best',      # Качаем лучшее доступное качество
+            'outtmpl': f"{base_filename}.%(ext)s", # Сохраняем с оригинальным расширением
             'quiet': True,
             'noprogress': True,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
+            # Мы УБРАЛИ блок 'postprocessors', который вызывал ошибку
         }
 
-        # Скачиваем через yt-dlp по прямой ссылке на страницу трека
+        # Скачиваем
         url = track.permalink_url
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             await asyncio.to_thread(ydl.download, [url])
 
-        # Проверяем, появился ли файл (иногда yt-dlp добавляет .mp3 к расширению)
-        if not os.path.exists(filename) and os.path.exists(filename + ".mp3"):
-            filename += ".mp3"
+        # Ищем скачанный файл (мы не знаем заранее, будет это .mp3 или .m4a)
+        # glob найдет любой файл, начинающийся с track_ID
+        found_files = glob.glob(f"{base_filename}.*")
+        
+        if not found_files:
+            await wait_msg.edit_text("❌ Ошибка: Файл не найден после скачивания.")
+            return
+            
+        final_filename = found_files[0] # Берем первый найденный файл
 
         # Отправляем в Telegram
-        audio_file = FSInputFile(filename)
+        audio_file = FSInputFile(final_filename)
         artist_name = getattr(track.user, 'username', 'Unknown')
         
         sent_msg = await message.answer_audio(
@@ -350,18 +356,19 @@ async def send_audio_track(message, track, idx_for_fav):
             reply_markup=get_player_keyboard(idx_for_fav, artist_name)
         )
         
-        # Кэшируем ID для избранного
         track.temp_file_id = sent_msg.audio.file_id
         await wait_msg.delete()
 
     except Exception as e:
-        logging.error(f"YT-DLP Error: {e}")
+        logging.error(f"Download Error: {e}")
         await message.answer(f"⚠️ Ошибка загрузки: {str(e)[:100]}")
+        
     finally:
         # Чистим за собой
-        if os.path.exists(filename):
-            try: os.remove(filename)
+        if final_filename and os.path.exists(final_filename):
+            try: os.remove(final_filename)
             except: pass
+                
 # Обработка добавления в избранное
 @dp.callback_query(F.data.startswith("add_fav:"))
 async def add_fav_handler(callback: types.CallbackQuery):
