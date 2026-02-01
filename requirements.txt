@@ -1,4 +1,3 @@
 yt_dlp
 soundcloud-v2
 aiogram
-glob
